@@ -15,9 +15,9 @@ from app.models.database import create_tables, SessionLocal, Topic
 
 INITIAL_TOPICS = [
     "LLM",
-    "Interpretable",
+    "Interpretability",
     "Explainability",
-    "Transformer",
+    "WSD",
 ]
 
 
