@@ -1,0 +1,84 @@
+name: RPRS Daily Pipeline
+
+on:
+  schedule:
+    # 毎日 UTC 22:00 = JST 07:00 に実行
+    - cron: "0 22 * * *"
+  # 手動実行（テスト用）
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: "メール通知を送信する"
+        type: boolean
+        default: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_HOST:         ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:         ${{ secrets.SMTP_PORT }}
+          SMTP_USER:         ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:     ${{ secrets.SMTP_PASSWORD }}
+          NOTIFY_TO:         ${{ secrets.NOTIFY_TO }}
+        run: |
+          python scripts/seed_topics.py
+          python scripts/daily_pipeline.py ${{ github.event.inputs.notify == 'true' && '--notify' || '' }}
+
+      # DB（SQLiteファイル）を7日間キャッシュとして保存
+      - name: Cache SQLite DB
+        uses: actions/cache@v4
+        with:
+          path: rprs.db
+          key: rprs-db-${{ github.run_number }}
+          restore-keys: rprs-db-
+
+  # 毎週月曜 07:00 JST にメール通知
+  weekly-notify:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: pipeline
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt
+
+      - name: Check if Monday (JST)
+        id: check_day
+        run: |
+          DAY=$(TZ=Asia/Tokyo date +%u)
+          echo "day=$DAY" >> $GITHUB_OUTPUT
+
+      - name: Send weekly email (Monday only)
+        if: steps.check_day.outputs.day == '1'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_HOST:         ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:         ${{ secrets.SMTP_PORT }}
+          SMTP_USER:         ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:     ${{ secrets.SMTP_PASSWORD }}
+          NOTIFY_TO:         ${{ secrets.NOTIFY_TO }}
+        run: python scripts/daily_pipeline.py --notify
