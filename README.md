@@ -14,7 +14,7 @@ arXiv API
 PostgreSQL / SQLite
    ↓ 重複チェック（F004）
    ↓ 関連度計算 TF-IDF + cos（F005）
-   ↓ 要約生成 Claude API（F007）
+   ↓ 要約生成 Gemini API（F007）
    ↓ メール通知（F008）
 利用者
 ```
@@ -31,7 +31,7 @@ PostgreSQL / SQLite
 | F004 | 重複除去       | arxiv_id + タイトル類似度（≥0.85）で判定        |
 | F005 | 関連度計算     | TF-IDF + コサイン類似度（Sentence-BERT も対応） |
 | F006 | 論文推薦       | 関連度 ≥ 70% の論文を抽出                       |
-| F007 | 要約生成       | Claude API で Abstract → 3行日本語要約          |
+| F007 | 要約生成       | Gemini API で Abstract → 3行日本語要約          |
 | F008 | メール通知     | 毎週月曜 07:00 JST に推薦論文をメール送信       |
 | F009 | 論文検索       | タイトル / 著者 / 年 / カテゴリで全文検索       |
 
@@ -50,7 +50,7 @@ rprs/
 │   ├── services/
 │   │   ├── collector.py       # F002/F003/F004 arXiv収集・保存・重複除去
 │   │   ├── scorer.py          # F005/F006 関連度計算・推薦生成
-│   │   ├── summarizer.py      # F007 要約生成（Claude API）
+│   │   ├── summarizer.py      # F007 要約生成（Gemini API）
 │   │   └── notifier.py        # F008 メール通知
 │   └── api/
 │       ├── topics.py          # F001 REST API
@@ -117,8 +117,8 @@ pip install -r requirements.txt
 `.env` ファイルを作成：
 
 ```env
-# Claude API（要約生成に使用）
-ANTHROPIC_API_KEY=sk-ant-...
+# Gemini API（要約生成に使用）
+GEMINI_API_KEY=...
 
 # メール送信（Gmailの場合）
 SMTP_HOST=smtp.gmail.com
@@ -169,7 +169,7 @@ python scripts/daily_pipeline.py --dry-run
 
 GitHub リポジトリの **Settings → Secrets** に以下を登録：
 
-- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD`
 - `NOTIFY_TO`
 
@@ -199,7 +199,7 @@ GitHub リポジトリの **Settings → Secrets** に以下を登録：
 | ORM        | SQLAlchemy 2.0                        |
 | DB         | SQLite（本番移行時は PostgreSQL対応）  |
 | 関連度計算 | TF-IDF + コサイン類似度（scikit-learn）|
-| 要約生成   | Claude API (claude-sonnet-4)          |
+| 要約生成   | GEMINI API (gemini-1.5-flash)          |
 | 自動実行   | GitHub Actions                        |
 
 ---
