@@ -8,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from typing import List, Optional
+from typing import List
 
 import requests
 import xml.etree.ElementTree as ET
@@ -22,6 +22,9 @@ ARXIV_API_URL = "http://export.arxiv.org/api/query"
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 SIMILARITY_THRESHOLD = 0.85  # タイトル類似度の閾値（F004）
+REQUEST_INTERVAL = 3.0        # arXiv APIへのリクエスト間隔（秒）
+MAX_RETRIES = 5               # 429発生時の最大リトライ回数
+RETRY_WAIT_BASE = 10          # リトライ初回待機秒数（指数バックオフ）
 
 
 # ──────────────────────────────────────────────
@@ -32,6 +35,27 @@ def _build_query(topics: List[str], days_back: int = 7) -> str:
     """トピックリストからarXiv検索クエリを生成"""
     topic_queries = [f"abs:{t} OR ti:{t}" for t in topics]
     return " OR ".join(topic_queries)
+
+
+def _request_with_retry(url: str, params: dict) -> requests.Response:
+    """
+    429 Too Many Requests に対して指数バックオフでリトライするHTTPクライアント。
+    10秒 → 20秒 → 40秒 → 80秒 → 160秒 の順で待機。
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        time.sleep(REQUEST_INTERVAL)  # 毎回最低3秒待機
+        response = requests.get(url, params=params, timeout=60)
+
+        if response.status_code == 429:
+            wait = RETRY_WAIT_BASE * (2 ** (attempt - 1))
+            logger.warning(f"429 Too Many Requests。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
+            time.sleep(wait)
+            continue
+
+        response.raise_for_status()
+        return response
+
+    raise RuntimeError(f"arXiv APIへのリクエストが{MAX_RETRIES}回失敗しました")
 
 
 def fetch_arxiv_papers(topics: List[str], max_results: int = 100, days_back: int = 7) -> List[dict]:
@@ -58,8 +82,7 @@ def fetch_arxiv_papers(topics: List[str], max_results: int = 100, days_back: int
     }
 
     logger.info(f"arXiv APIへのリクエスト: query={query[:80]}...")
-    response = requests.get(ARXIV_API_URL, params=params, timeout=30)
-    response.raise_for_status()
+    response = _request_with_retry(ARXIV_API_URL, params)
 
     return _parse_arxiv_response(response.text, days_back)
 
