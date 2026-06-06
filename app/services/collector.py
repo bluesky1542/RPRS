@@ -18,13 +18,14 @@ from app.models.database import Paper, Topic
 
 logger = logging.getLogger(__name__)
 
-ARXIV_API_URL = "http://export.arxiv.org/api/query"
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 SIMILARITY_THRESHOLD = 0.85  # タイトル類似度の閾値（F004）
-REQUEST_INTERVAL = 3.0        # arXiv APIへのリクエスト間隔（秒）
-MAX_RETRIES = 5               # 429発生時の最大リトライ回数
-RETRY_WAIT_BASE = 10          # リトライ初回待機秒数（指数バックオフ）
+REQUEST_INTERVAL = 5.0        # arXiv APIへのリクエスト間隔（秒）
+MAX_RETRIES = 5               # リトライ最大回数
+RETRY_WAIT_BASE = 15          # リトライ初回待機秒数（指数バックオフ）
+REQUEST_TIMEOUT = 120         # タイムアウト秒数
 
 
 # ──────────────────────────────────────────────
@@ -39,31 +40,49 @@ def _build_query(topics: List[str], days_back: int = 7) -> str:
 
 def _request_with_retry(url: str, params: dict) -> requests.Response:
     """
-    429 Too Many Requests に対して指数バックオフでリトライするHTTPクライアント。
-    10秒 → 20秒 → 40秒 → 80秒 → 160秒 の順で待機。
+    429 Too Many Requests・タイムアウトに対して
+    指数バックオフでリトライするHTTPクライアント。
+    15秒 → 30秒 → 60秒 → 120秒 → 240秒 の順で待機。
     """
     for attempt in range(1, MAX_RETRIES + 1):
-        time.sleep(REQUEST_INTERVAL)  # 毎回最低3秒待機
-        response = requests.get(url, params=params, timeout=60)
+        time.sleep(REQUEST_INTERVAL)  # 毎回最低5秒待機
+        try:
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
 
-        if response.status_code == 429:
+            if response.status_code == 429:
+                wait = RETRY_WAIT_BASE * (2 ** (attempt - 1))
+                logger.warning(f"429 Too Many Requests。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
+                time.sleep(wait)
+                continue
+
+            response.raise_for_status()
+            return response
+
+        except requests.exceptions.Timeout:
             wait = RETRY_WAIT_BASE * (2 ** (attempt - 1))
-            logger.warning(f"429 Too Many Requests。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
-            time.sleep(wait)
-            continue
+            logger.warning(f"タイムアウト発生。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
+            if attempt < MAX_RETRIES:
+                time.sleep(wait)
+            else:
+                raise
 
-        response.raise_for_status()
-        return response
+        except requests.exceptions.ConnectionError:
+            wait = RETRY_WAIT_BASE * (2 ** (attempt - 1))
+            logger.warning(f"接続エラー。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
+            if attempt < MAX_RETRIES:
+                time.sleep(wait)
+            else:
+                raise
 
     raise RuntimeError(f"arXiv APIへのリクエストが{MAX_RETRIES}回失敗しました")
 
 
-def fetch_arxiv_papers(topics: List[str], max_results: int = 100, days_back: int = 7) -> List[dict]:
+def fetch_arxiv_papers(topics: List[str], max_results: int = 50, days_back: int = 7) -> List[dict]:
     """
     arXiv APIから論文を取得する。
     Args:
         topics: 検索トピックリスト
-        max_results: 最大取得件数
+        max_results: 最大取得件数（タイムアウト対策で100→50に削減）
         days_back: 何日前まで遡るか
     Returns:
         論文情報のリスト
@@ -149,12 +168,10 @@ def is_duplicate(db: Session, paper_data: dict) -> bool:
     1. arxiv_id の完全一致
     2. タイトル類似度 >= SIMILARITY_THRESHOLD
     """
-    # arxiv_id チェック
     exists = db.query(Paper).filter(Paper.arxiv_id == paper_data["arxiv_id"]).first()
     if exists:
         return True
 
-    # タイトル類似度チェック（最新50件に限定してパフォーマンス確保）
     recent_papers = db.query(Paper.title).order_by(Paper.created_at.desc()).limit(50).all()
     for (existing_title,) in recent_papers:
         if _title_similarity(paper_data["title"], existing_title) >= SIMILARITY_THRESHOLD:
