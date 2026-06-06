@@ -49,9 +49,9 @@ def _request_with_retry(url: str, params: dict) -> requests.Response:
         try:
             response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
 
-            if response.status_code == 429:
+            if response.status_code in (429, 500, 502, 503):
                 wait = RETRY_WAIT_BASE * (2 ** (attempt - 1))
-                logger.warning(f"429 Too Many Requests。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
+                logger.warning(f"{response.status_code} エラー。{wait}秒後にリトライ ({attempt}/{MAX_RETRIES})")
                 time.sleep(wait)
                 continue
 
