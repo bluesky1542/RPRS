@@ -30,6 +30,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # DB（SQLiteファイル）をパイプライン実行前に復元
+      - name: Restore SQLite DB cache
+        uses: actions/cache/restore@v5
+        with:
+          path: rprs.db
+          key: rprs-db-${{ github.run_number }}
+          restore-keys: rprs-db-
+
       - name: Run daily pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -42,13 +50,12 @@ jobs:
           python scripts/seed_topics.py
           python scripts/daily_pipeline.py ${{ github.event.inputs.notify == 'true' && '--notify' || '' }}
 
-      # DB（SQLiteファイル）を7日間キャッシュとして保存
-      - name: Cache SQLite DB
-        uses: actions/cache@v5
+      # DB（SQLiteファイル）を実行後に保存
+      - name: Save SQLite DB cache
+        uses: actions/cache/save@v5
         with:
           path: rprs.db
           key: rprs-db-${{ github.run_number }}
-          restore-keys: rprs-db-
 
   # 毎週月曜 07:00 JST にメール通知
   weekly-notify:
