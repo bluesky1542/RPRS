@@ -73,6 +73,17 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # pipelineジョブで保存したDBを復元
+      - name: Restore SQLite DB cache
+        uses: actions/cache/restore@v5
+        with:
+          path: rprs.db
+          key: rprs-db-${{ github.run_number }}
+          restore-keys: rprs-db-
+
+      - name: Seed topics
+        run: python scripts/seed_topics.py
+
       - name: Check if Monday (JST)
         id: check_day
         run: |
